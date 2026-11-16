@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BorrowBack — Personal Lending Tracker</title>
+<meta name="description" content="Track items you lend and borrow. Who has your stuff, what you owe, and what is overdue — stored only in your browser.">
+<link rel="stylesheet" href="styles.css">
+<script>
+/* Apply saved theme before first paint to avoid a flash.
+   Reads the localStorage mirror only — never open IndexedDB here, or an
+   empty database would be created before db.js can create its stores. */
+(function () {
+  try {
+    var stored = localStorage.getItem('borrowback-theme');
+    var dark = stored === 'dark' ||
+      (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  } catch (e) { document.documentElement.dataset.theme = 'light'; }
+})();
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<aside class="sidebar" aria-label="Primary">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6"/></svg>
+    </span>
+    <span class="brand-text"><span class="brand-name">BorrowBack</span><span class="brand-tag">Lend it. Track it. Get it back.</span></span>
+  </div>
+  <nav class="nav" aria-label="Sections">
+    <button class="nav-item is-active" data-nav="dashboard" aria-current="page">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-item" data-nav="records">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      <span>My Records</span>
+    </button>
+    <button class="nav-item" data-nav="history">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <span>History</span>
+    </button>
+    <button class="nav-item" data-nav="settings">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+  <p class="sidebar-note">Your records stay in this browser. Nothing is uploaded.</p>
+</aside>
+
+<main id="main" class="main">
+  <!-- Dashboard -->
+  <section id="section-dashboard" class="section is-visible" aria-labelledby="dash-title">
+    <header class="page-head">
+      <div>
+        <h1 id="dash-title">Dashboard</h1>
+        <p class="page-sub">Who has your stuff, what you owe, and what is overdue.</p>
+      </div>
+      <button class="btn btn-primary" id="quick-add-btn" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        Add Record
+      </button>
+    </header>
+
+    <div class="stats-grid" role="group" aria-label="Lending statistics">
+      <div class="stat-card"><span class="stat-label">Lent Out</span><span class="stat-value" id="stat-lent">0</span><span class="stat-hint">Active items you lent</span></div>
+      <div class="stat-card"><span class="stat-label">Borrowed</span><span class="stat-value" id="stat-borrowed">0</span><span class="stat-hint">Active items you owe</span></div>
+      <div class="stat-card stat-overdue"><span class="stat-label">Overdue</span><span class="stat-value" id="stat-overdue">0</span><span class="stat-hint">Past their due date</span></div>
+      <div class="stat-card"><span class="stat-label">Completed</span><span class="stat-value" id="stat-completed">0</span><span class="stat-hint">Returned records</span></div>
+    </div>
+
+    <div id="dash-empty" class="empty-state" hidden>
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13h6"/></svg>
+      <p class="empty-title">Keep track of what goes out and what comes back.</p>
+      <p class="empty-sub">Add your first lending or borrowing record to see it here.</p>
+      <button class="btn btn-primary" id="empty-add-btn" type="button">Add Your First Record</button>
+    </div>
+
+    <div id="dash-lists">
+      <div class="dash-block">
+        <h2>Needs Attention <span class="count-pill" id="attention-count">0</span></h2>
+        <p class="block-sub">Overdue items, earliest due date first.</p>
+        <ul class="record-list" id="attention-list"></ul>
+        <p class="list-empty" id="attention-empty">Nothing overdue. Nice.</p>
+      </div>
+      <div class="dash-block">
+        <h2>Due Soon <span class="count-pill" id="due-soon-count">0</span></h2>
+        <p class="block-sub" id="due-soon-sub">Due today or within the next 7 days.</p>
+        <ul class="record-list" id="due-soon-list"></ul>
+        <p class="list-empty" id="due-soon-empty">Nothing due soon.</p>
+      </div>
+      <div class="dash-block">
+        <h2>Recent Activity</h2>
+        <p class="block-sub">Latest updates across all records.</p>
+        <ul class="record-list" id="recent-list"></ul>
+        <p class="list-empty" id="recent-empty">No activity yet.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Records -->
+  <section id="section-records" class="section" aria-labelledby="records-title">
+    <header class="page-head">
+      <div>
+        <h1 id="records-title">My Records</h1>
+        <p class="page-sub">Active lending and borrowing. <span id="records-count"></span></p>
+      </div>
+      <button class="btn btn-primary" id="records-add-btn" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        Add Record
+      </button>
+    </header>
+
+    <div class="filter-bar" role="search">
+      <div class="field field-search">
+        <label for="search-input">Search</label>
+        <input type="search" id="search-input" placeholder="Search item, person, or notes" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="filter-direction">Direction</label>
+        <select id="filter-direction">
+          <option value="all">All</option>
+          <option value="lent">Lent</option>
+          <option value="borrowed">Borrowed</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="filter-category">Category</label>
+        <select id="filter-category">
+          <option value="all">All categories</option>
+          <option>Electronics</option><option>Books</option><option>Tools</option>
+          <option>Clothing</option><option>Household</option><option>Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="filter-status">Status</label>
+        <select id="filter-status">
+          <option value="all">All Active</option>
+          <option value="on-track">On Track</option>
+          <option value="due-soon">Due Soon</option>
+          <option value="due-today">Due Today</option>
+          <option value="overdue">Overdue</option>
+          <option value="no-due-date">No Due Date</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="sort-select">Sort by</label>
+        <select id="sort-select">
+          <option value="due-date">Due Date (earliest)</option>
+          <option value="recent">Recently Added</option>
+          <option value="oldest">Oldest Added</option>
+          <option value="item">Item Name A–Z</option>
+          <option value="person">Person Name A–Z</option>
+        </select>
+      </div>
+      <button class="btn btn-ghost" id="clear-filters-btn" type="button">Clear Filters</button>
+    </div>
+
+    <ul class="record-list record-cards" id="records-list"></ul>
+    <div class="empty-state" id="records-empty" hidden>
+      <p class="empty-title" id="records-empty-title">No records yet.</p>
+      <p class="empty-sub">Add a record when you lend something out or borrow something.</p>
+      <button class="btn btn-primary" id="records-empty-add-btn" type="button">Add Record</button>
+    </div>
+    <div class="empty-state" id="records-no-match" hidden>
+      <p class="empty-title">No matching records.</p>
+      <p class="empty-sub">Try a different search or loosen the filters.</p>
+      <button class="btn btn-ghost" id="no-match-clear-btn" type="button">Clear Filters</button>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section id="section-history" class="section" aria-labelledby="history-title">
+    <header class="page-head">
+      <div>
+        <h1 id="history-title">History</h1>
+        <p class="page-sub">Completed lending and borrowing. <span id="history-count"></span></p>
+      </div>
+    </header>
+    <div class="filter-bar" role="search">
+      <div class="field field-search">
+        <label for="history-search">Search</label>
+        <input type="search" id="history-search" placeholder="Search item or person" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="history-direction">Direction</label>
+        <select id="history-direction">
+          <option value="all">All</option>
+          <option value="lent">Lent</option>
+          <option value="borrowed">Borrowed</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="history-sort">Sort by</label>
+        <select id="history-sort">
+          <option value="return-newest">Return Date (newest)</option>
+          <option value="return-oldest">Return Date (oldest)</option>
+          <option value="item">Item Name A–Z</option>
+        </select>
+      </div>
+    </div>
+    <ul class="record-list record-cards" id="history-list"></ul>
+    <div class="empty-state" id="history-empty" hidden>
+      <p class="empty-title">Your completed returns will appear here.</p>
+      <p class="empty-sub">Mark a record as returned and it moves here.</p>
+    </div>
+    <div class="empty-state" id="history-no-match" hidden>
+      <p class="empty-title">No matching records.</p>
+      <p class="empty-sub">Try a different search or filter.</p>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="section-settings" class="section" aria-labelledby="settings-title">
+    <header class="page-head">
+      <div>
+        <h1 id="settings-title">Settings</h1>
+        <p class="page-sub">Appearance, reminders, backup, and your data.</p>
+      </div>
+    </header>
+
+    <div class="settings-grid">
+      <div class="card settings-card">
+        <h2>Appearance</h2>
+        <fieldset class="radio-group" id="theme-group">
+          <legend>Theme</legend>
+          <label class="radio"><input type="radio" name="theme" value="light"> Light</label>
+          <label class="radio"><input type="radio" name="theme" value="dark"> Dark</label>
+          <label class="radio"><input type="radio" name="theme" value="system"> System</label>
+        </fieldset>
+        <p class="hint">System follows your device setting.</p>
+      </div>
+
+      <div class="card settings-card">
+        <h2>Reminder preferences</h2>
+        <div class="field">
+          <label for="due-soon-select">Due-soon threshold</label>
+          <select id="due-soon-select">
+            <option value="1">1 day</option>
+            <option value="3">3 days</option>
+            <option value="7" selected>7 days</option>
+            <option value="14">14 days</option>
+          </select>
+        </div>
+        <p class="hint">Records due within this many days count as Due Soon. On-screen reminders only — no push notifications, emails, alarms, or background scheduling.</p>
+      </div>
+
+      <div class="card settings-card">
+        <h2>Backup and restore</h2>
+        <p class="hint">Export all records and settings as one JSON file, or restore from a backup file. Import replaces everything, after confirmation.</p>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="export-btn" type="button">Export Backup</button>
+          <button class="btn btn-secondary" id="import-btn" type="button">Import Backup</button>
+          <input type="file" id="import-file" accept=".json,application/json" hidden>
+        </div>
+        <p class="hint" id="import-status" role="status"></p>
+      </div>
+
+      <div class="card settings-card">
+        <h2>Your data</h2>
+        <dl class="data-stats">
+          <div><dt>Total records</dt><dd id="data-total">0</dd></div>
+          <div><dt>Active records</dt><dd id="data-active">0</dd></div>
+          <div><dt>Completed records</dt><dd id="data-completed">0</dd></div>
+        </dl>
+        <button class="btn btn-danger" id="delete-all-btn" type="button">Delete All Data</button>
+        <p class="hint">This clears every record and resets settings to defaults. It cannot be undone except by restoring a backup.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="bottom-nav" aria-label="Sections">
+  <button class="bottom-nav-item is-active" data-nav="dashboard" aria-current="page">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+    <span>Dashboard</span>
+  </button>
+  <button class="bottom-nav-item" data-nav="records">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+    <span>Records</span>
+  </button>
+  <button class="bottom-nav-item" data-nav="history">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    <span>History</span>
+  </button>
+  <button class="bottom-nav-item" data-nav="settings">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06-.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span>Settings</span>
+  </button>
+</nav>
+
+<!-- Record form dialog -->
+<dialog id="record-dialog" class="dialog" aria-labelledby="record-dialog-title">
+  <form id="record-form" method="dialog" novalidate>
+    <h2 id="record-dialog-title">Add Record</h2>
+    <p class="form-error" id="form-error" role="alert" hidden></p>
+    <div class="form-grid">
+      <fieldset class="field field-full">
+        <legend>Direction</legend>
+        <div class="radio-row">
+          <label class="radio"><input type="radio" name="direction" value="lent" checked> I Lent It</label>
+          <label class="radio"><input type="radio" name="direction" value="borrowed"> I Borrowed It</label>
+        </div>
+        <p class="field-error" id="err-direction" hidden></p>
+      </fieldset>
+      <div class="field">
+        <label for="f-item">Item name</label>
+        <input type="text" id="f-item" maxlength="100" autocomplete="off" placeholder="e.g. Power drill">
+        <p class="field-error" id="err-item" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-person">Person name</label>
+        <input type="text" id="f-person" maxlength="80" autocomplete="off" placeholder="e.g. Sara Ahmed">
+        <p class="field-error" id="err-person" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-category">Category</label>
+        <select id="f-category">
+          <option value="">Select a category</option>
+          <option>Electronics</option><option>Books</option><option>Tools</option>
+          <option>Clothing</option><option>Household</option><option>Other</option>
+        </select>
+        <p class="field-error" id="err-category" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-quantity">Quantity</label>
+        <input type="number" id="f-quantity" min="1" max="999" step="1" value="1" inputmode="numeric">
+        <p class="field-error" id="err-quantity" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-start">Start date</label>
+        <input type="date" id="f-start">
+        <p class="field-error" id="err-start" hidden></p>
+      </div>
+      <div class="field">
+        <label for="f-due">Due date <span class="optional">(optional)</span></label>
+        <input type="date" id="f-due">
+        <p class="field-error" id="err-due" hidden></p>
+      </div>
+      <div class="field field-full">
+        <label for="f-notes">Notes <span class="optional">(optional, max 500 characters)</span></label>
+        <textarea id="f-notes" rows="3" maxlength="500" placeholder="Anything worth remembering about this item"></textarea>
+        <p class="field-error" id="err-notes" hidden></p>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit" id="record-submit">Save Record</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Details dialog -->
+<dialog id="details-dialog" class="dialog" aria-labelledby="details-title">
+  <h2 id="details-title">Record Details</h2>
+  <dl class="details-list" id="details-body"></dl>
+  <div class="dialog-actions">
+    <button class="btn btn-ghost" type="button" data-close>Close</button>
+    <button class="btn btn-secondary" type="button" id="details-edit-btn">Edit</button>
+    <button class="btn btn-primary" type="button" id="details-return-btn">Mark Returned</button>
+  </div>
+</dialog>
+
+<!-- Return dialog -->
+<dialog id="return-dialog" class="dialog" aria-labelledby="return-title">
+  <form id="return-form" method="dialog" novalidate>
+    <h2 id="return-title">Mark Returned</h2>
+    <p class="dialog-text" id="return-text"></p>
+    <div class="field">
+      <label for="f-return-date">Return date</label>
+      <input type="date" id="f-return-date">
+      <p class="field-error" id="err-return-date" hidden></p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit">Confirm Return</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Generic confirm dialog -->
+<dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
+  <h2 id="confirm-title">Are you sure?</h2>
+  <p class="dialog-text" id="confirm-text"></p>
+  <div class="dialog-actions">
+    <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+    <button class="btn btn-danger" type="button" id="confirm-ok-btn">Delete</button>
+  </div>
+</dialog>
+
+<!-- Delete all dialog -->
+<dialog id="delete-all-dialog" class="dialog" aria-labelledby="delete-all-title">
+  <form id="delete-all-form" method="dialog" novalidate>
+    <h2 id="delete-all-title">Delete All Data</h2>
+    <p class="dialog-text">This permanently deletes every record and resets settings to defaults. This cannot be undone except by restoring a backup. Type <strong>DELETE</strong> to confirm.</p>
+    <div class="field">
+      <label for="f-delete-word">Type DELETE to confirm</label>
+      <input type="text" id="f-delete-word" autocomplete="off" placeholder="DELETE">
+      <p class="field-error" id="err-delete-word" hidden></p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button class="btn btn-danger" type="submit">Delete Everything</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="date-utils.js"></script>
+<script src="db.js"></script>
+<script src="backup.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
